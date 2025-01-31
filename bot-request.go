@@ -8,6 +8,7 @@ import (
 )
 
 type BotRequest struct {
+	ID             int
 	EndpointURL    string
 	RequestMethod  string
 	UserAgent      string
@@ -19,8 +20,31 @@ type BotRequest struct {
 	ProxyURL       string
 	Payload        string
 }
+type Response struct {
+	RequestID  int
+	ID         int
+	StatusCode int
+	Body       string
+	Error      error
+}
 
-func NewRandomBotRequest(requestMethod, endpointURL string) *BotRequest {
+func NewCurlBotRequest(id int, requestMethod, endpointURL string) *BotRequest {
+	return &BotRequest{
+		ID:             id,
+		EndpointURL:    endpointURL,
+		RequestMethod:  requestMethod,
+		UserAgent:      "curl/7.64.1",
+		ContentType:    "*/*",
+		AcceptLanguage: "en-US",
+		AcceptEncoding: "*",
+		Referer:        "",
+		Cookies:        "",
+		ProxyURL:       "",
+		Payload:        "",
+	}
+}
+
+func NewRandomizedBotRequest(id int, requestMethod, endpointURL string) *BotRequest {
 	userAgent := userAgents[rand.Intn(len(userAgents))]
 	contentType := contentTypes[rand.Intn(len(contentTypes))]
 	acceptLanguage := acceptLanguages[rand.Intn(len(acceptLanguages))]
@@ -31,6 +55,7 @@ func NewRandomBotRequest(requestMethod, endpointURL string) *BotRequest {
 	payload := payloads[rand.Intn(len(payloads))]
 
 	return &BotRequest{
+		ID:             id,
 		EndpointURL:    endpointURL,
 		RequestMethod:  requestMethod,
 		UserAgent:      userAgent,
@@ -49,7 +74,8 @@ func (this *BotRequest) Send() (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-
+	request.Header.Set("Accept", "*/*")
+	request.Header.Set("Connection", "close")
 	request.Header.Set("User-Agent", this.UserAgent)
 	request.Header.Set("Content-Type", this.ContentType)
 	request.Header.Set("Accept-Language", this.AcceptLanguage)
@@ -85,8 +111,10 @@ var (
 		"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
 		"Chrome/51.0.2704.103 Safari/537.36",
 		"BotSpoof/1.0",
+		"curl/7.64.1",
 	}
 	contentTypes = []string{
+		"*/*",
 		"application/json",
 		"plain/text",
 		"application/x-www-form-urlencoded",

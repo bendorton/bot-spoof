@@ -9,48 +9,51 @@ import (
 	"time"
 )
 
+// TODO verify that http requests are denied
 const (
-	endpointURL = "http://cloudflare.liveaddress.us"
-	iterations  = 20
-	workerCount = 3
+	endpointURL             = "https://cloudflare.liveaddress.us"
+	randomRequestVariations = 10
+	requestIterations       = 10
+	workerCount             = 5
 )
-
-type Response struct {
-	StatusCode int
-	Body       string
-	Error      error
-}
 
 func main() {
 	fmt.Println("Starting bot tester...")
 
-	requestChan := make(chan int, iterations)
+	var botRequests []*BotRequest
+	requestChan := make(chan *BotRequest, requestIterations*randomRequestVariations)
 	resultChan := make(chan Response)
 	var wg sync.WaitGroup
 
+	for i := range randomRequestVariations {
+		botRequests = append(botRequests, NewRandomizedBotRequest(i, "POST", endpointURL))
+	}
+	botRequests = append(botRequests, NewCurlBotRequest(len(botRequests), "POST", endpointURL))
+
 	// Start worker goroutines
-	for i := 0; i < workerCount; i++ {
+	for i := range workerCount {
 		wg.Add(1)
 		go worker(i, requestChan, resultChan, &wg)
 	}
 
 	go func() {
-		for i := 0; i < iterations; i++ {
-			requestChan <- i
-			time.Sleep(time.Millisecond * time.Duration(rand.Intn(500)))
+		for _, request := range botRequests {
+			requestChan <- request
 		}
 		close(requestChan)
 	}()
 
 	// Collect Results
-	var totalRequests, failedRequests []Response
+	responses := make(map[int][]Response)
+	var totalResponseCount, failedRequestCount int
 	var mu sync.Mutex
 	go func() {
 		for result := range resultChan {
 			mu.Lock()
-			totalRequests = append(totalRequests, result)
+			totalResponseCount++
+			responses[result.RequestID] = append(responses[result.RequestID], result)
 			if result.Error != nil {
-				failedRequests = append(failedRequests, result)
+				failedRequestCount++
 			}
 			mu.Unlock()
 		}
@@ -61,39 +64,59 @@ func main() {
 	close(resultChan)
 
 	// Output results
-	fmt.Println("Bot Spoof Report.")
-	fmt.Printf("Total Requests: %d\n", len(totalRequests))
-	fmt.Printf("Failed requests: %v\n", len(failedRequests))
-	for _, failure := range failedRequests {
-		fmt.Printf("Failed Request - Status: %d, Error: %v, Body: %s\n", failure.StatusCode, failure.Error, failure.Body)
-	}
-}
-
-func worker(id int, requests <-chan int, results chan<- Response, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for requestID := range requests {
-		fmt.Printf("Worker %d processing request %d\n", id, requestID)
-		botRequest := NewRandomBotRequest("POST", endpointURL)
-		resp, err := botRequest.Send()
-		if err != nil {
-			results <- Response{Error: err}
-		} else {
-			results <- parseResponse(resp)
+	fmt.Println("\nBot Spoof Report")
+	fmt.Printf("Requests:\n")
+	for _, request := range botRequests {
+		fmt.Printf("Request %d:\n", request.ID)
+		fmt.Printf("\t%+v\n", request)
+		fmt.Printf("Requests Sent: %d\n", len(responses[request.ID]))
+		for _, response := range responses[request.ID] {
+			if response.Error != nil {
+				fmt.Printf("\t%d: %s\n", response.StatusCode, response.Error)
+			}
 		}
+		fmt.Println()
+	}
+	fmt.Printf("Total Requests Sent: %d\n", totalResponseCount)
+	fmt.Printf("Total Failed Requests: %d\n", failedRequestCount)
+}
+
+func worker(id int, requests <-chan *BotRequest, results chan<- Response, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for request := range requests {
+		fmt.Printf("Worker %d processing request ID %d\n", id, request.ID)
+		for i := range requestIterations {
+			resp, err := request.Send()
+			if err != nil {
+				results <- Response{RequestID: request.ID, ID: i, Error: err}
+			} else {
+				results <- parseResponse(request.ID, i, resp)
+			}
+			time.Sleep(time.Millisecond * time.Duration(rand.Intn(500)))
+		}
+		fmt.Printf("Worker %d finished processing request ID %d\n", id, request.ID)
 	}
 }
 
-func parseResponse(response *http.Response) Response {
+func parseResponse(requestID, requestIteration int, response *http.Response) Response {
 	defer response.Body.Close()
+
+	res := Response{
+		RequestID:  requestID,
+		ID:         requestIteration,
+		StatusCode: response.StatusCode,
+	}
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return Response{StatusCode: response.StatusCode, Body: "", Error: fmt.Errorf("failed to read response: %w", err)}
+		res.Error = fmt.Errorf("failed to read response: %w", err)
+		return res
 	}
+	res.Body = string(body)
 
 	if response.StatusCode != 200 {
-		return Response{StatusCode: response.StatusCode, Body: string(body), Error: fmt.Errorf("unexpected status code")}
+		res.Error = fmt.Errorf("unexpected status code")
 	}
 
-	return Response{StatusCode: response.StatusCode, Body: string(body), Error: nil}
+	return res
 }
