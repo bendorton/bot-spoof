@@ -1,50 +1,10 @@
-package main
+package bot
 
 import (
-	"bytes"
-	"fmt"
 	"math/rand"
-	"net/http"
 )
 
-type BotRequest struct {
-	ID             int
-	EndpointURL    string
-	RequestMethod  string
-	UserAgent      string
-	ContentType    string
-	AcceptLanguage string
-	AcceptEncoding string
-	Referer        string
-	Cookies        string
-	ProxyURL       string
-	Payload        string
-}
-type Response struct {
-	RequestID  int
-	ID         int
-	StatusCode int
-	Body       string
-	Error      error
-}
-
-func NewCurlBotRequest(id int, requestMethod, endpointURL string) *BotRequest {
-	return &BotRequest{
-		ID:             id,
-		EndpointURL:    endpointURL,
-		RequestMethod:  requestMethod,
-		UserAgent:      "curl/7.64.1",
-		ContentType:    "*/*",
-		AcceptLanguage: "en-US",
-		AcceptEncoding: "*",
-		Referer:        "",
-		Cookies:        "",
-		ProxyURL:       "",
-		Payload:        "",
-	}
-}
-
-func NewRandomizedBotRequest(id int, requestMethod, endpointURL string) *BotRequest {
+func NewRandomizedBot(requestMethod, endpointURL string) *BasicHTTPBot {
 	userAgent := userAgents[rand.Intn(len(userAgents))]
 	contentType := contentTypes[rand.Intn(len(contentTypes))]
 	acceptLanguage := acceptLanguages[rand.Intn(len(acceptLanguages))]
@@ -54,10 +14,11 @@ func NewRandomizedBotRequest(id int, requestMethod, endpointURL string) *BotRequ
 	proxyURL := proxies[rand.Intn(len(proxies))]
 	payload := payloads[rand.Intn(len(payloads))]
 
-	return &BotRequest{
-		ID:             id,
+	return &BasicHTTPBot{
 		EndpointURL:    endpointURL,
 		RequestMethod:  requestMethod,
+		Accept:         "*/*",
+		Connection:     "close",
 		UserAgent:      userAgent,
 		ContentType:    contentType,
 		AcceptLanguage: acceptLanguage,
@@ -67,40 +28,6 @@ func NewRandomizedBotRequest(id int, requestMethod, endpointURL string) *BotRequ
 		ProxyURL:       proxyURL,
 		Payload:        payload,
 	}
-}
-
-func (this *BotRequest) Send() (*http.Response, error) {
-	request, err := http.NewRequest(this.RequestMethod, this.EndpointURL, bytes.NewBuffer([]byte(this.Payload)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	request.Header.Set("Accept", "*/*")
-	request.Header.Set("Connection", "close")
-	request.Header.Set("User-Agent", this.UserAgent)
-	request.Header.Set("Content-Type", this.ContentType)
-	request.Header.Set("Accept-Language", this.AcceptLanguage)
-	request.Header.Set("Accept-Encoding", this.AcceptEncoding)
-	request.Header.Set("Referer", this.Referer)
-	request.Header.Set("Cookie", this.Cookies)
-
-	client := &http.Client{}
-	//if this.ProxyURL != "" {
-	//	proxyURL, err := url.Parse(this.ProxyURL)
-	//	if err == nil {
-	//		client = &http.Client{
-	//			Transport: &http.Transport{
-	//				Proxy: http.ProxyURL(proxyURL),
-	//			},
-	//		}
-	//	}
-	//}
-
-	res, err := client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	return res, nil
 }
 
 var (
