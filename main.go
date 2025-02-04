@@ -9,7 +9,6 @@ import (
 	"github.com/bendorton/bot-spoof/bot"
 )
 
-// TODO verify that http requests are denied
 const (
 	endpointURL             = "https://cloudflare.liveaddress.us"
 	randomRequestVariations = 10
@@ -29,7 +28,7 @@ func main() {
 	// Set up bots to test
 	bots := []bot.Bot{
 		bot.NewCurlBot("POST", endpointURL),
-		bot.NewScraper(endpointURL),
+		bot.NewHeadlessBrowser(endpointURL),
 	}
 	for range randomRequestVariations {
 		bots = append(bots, bot.NewRandomizedBot("POST", endpointURL))
@@ -60,7 +59,8 @@ func main() {
 	}()
 
 	// Log results
-	LogResults(resultChan)
+	results := CollectResults(resultChan)
+	LogResults(results)
 	fmt.Println("Bot tester finished.")
 }
 
@@ -72,18 +72,47 @@ func LogBotConfigs(bots []bot.Bot) {
 	fmt.Printf("\n")
 }
 
-func LogResults(results chan Result) {
-	var totalRequests, failedRequests int
+func CollectResults(results chan Result) map[int][]Result {
+	var mu sync.Mutex
+	botResponses := make(map[int][]Result)
 
 	for res := range results {
-		totalRequests++
-		if res.Error != nil {
-			failedRequests++
-			fmt.Printf("Bot %d: FAILED Status Code: %d (Error: %v)\n", res.BotID, res.StatusCode, res.Error)
+		mu.Lock()
+		botResponses[res.BotID] = append(botResponses[res.BotID], res)
+		mu.Unlock()
+	}
+
+	return botResponses
+}
+
+func LogResults(results map[int][]Result) {
+	var totalRequests, totalFailedRequests int
+
+	for botID, result := range results {
+		fmt.Printf("Bot %d:\n", botID)
+
+		var requestCount, errorCount int
+		failedResponses := make(map[string]int)
+		for _, res := range result {
+			totalRequests++
+			requestCount++
+			if res.Error != nil {
+				totalFailedRequests++
+				errorCount++
+
+				err := fmt.Sprintf("FAILED Status Code: %d (Error: %v)\n", res.StatusCode, res.Error)
+				failedResponses[err]++
+			}
 		}
+
+		for err, count := range failedResponses {
+			fmt.Printf("\t(%d) %s", count, err)
+		}
+
+		fmt.Printf("Failed %d/%d requests\n\n", errorCount, requestCount)
 	}
 
 	fmt.Printf("\nTest Summary:\n")
 	fmt.Printf("Total Requests: %d\n", totalRequests)
-	fmt.Printf("Failed Requests: %d\n", failedRequests)
+	fmt.Printf("Failed Requests: %d\n", totalFailedRequests)
 }
